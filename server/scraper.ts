@@ -20,58 +20,48 @@ export async function scrapeDanawa(month: string, nation: 'domestic' | 'export')
   console.log(`Scraping ${url}...`);
   
   try {
-    const { data } = await axios.get(url);
+    const { data } = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
     const $ = cheerio.load(data);
     
     const records: Partial<InsertCarSale>[] = [];
     
-    // Check if the page has data. The table selector might vary.
-    // Based on inspection (simulated): look for table rows in the ranking table.
-    // Usually table.recordTable tbody tr
-    
-    // Note: The structure is tricky. We need to be flexible.
-    // Assuming a standard table structure based on similar sites.
-    // Row usually has: Rank, Model Name (link), Sales, Share, Diff (Month), Diff (Year)
-    
-    $('table.recordTable tbody tr').each((i, el) => {
-        // Skip "trim" rows if they exist (usually have different class or no rank)
-        // Check for rank column
+    // Updated selector for Danawa auto record table
+    // Based on the provided template and typical Danawa structure
+    $('.recordTable tbody tr').each((i, el) => {
+        // Skip "trim" rows (usually have specific class or structure)
+        if ($(el).hasClass('trim')) return;
+
         const rankText = $(el).find('td.rank').text().trim();
-        if (!rankText || isNaN(parseInt(rankText))) return; // Skip if no rank
+        if (!rankText || isNaN(parseInt(rankText))) return;
 
         const rank = parseInt(rankText);
-        const modelName = $(el).find('td.title a').text().trim();
-        const linkUrl = $(el).find('td.title a').attr('href') || '';
+        const titleLink = $(el).find('td.title a').first();
+        const modelName = titleLink.text().trim();
+        const linkUrl = titleLink.attr('href') || '';
         const fullLink = linkUrl.startsWith('http') ? linkUrl : `https://auto.danawa.com${linkUrl}`;
         
-        // Sales is usually in a specific column. Let's guess indices or classes.
-        // Assuming: Rank, Title, Sales, ...
-        // Danawa structure might be: Rank, Model, Sales, Share, MoM, YoY
-        
+        // Sales volume
         const salesText = $(el).find('td.record').first().text().trim().replace(/,/g, '');
         const sales = parseInt(salesText) || 0;
         
-        // MoM Diff is usually next.
-        // The page usually shows the *difference*.
-        // We need Prev Sales. Prev Sales = Sales - Diff.
-        // Or sometimes the page shows Prev Sales directly? 
-        // User requirements said: "Page already shows Sales ... Prev Month(Diff)".
-        // Let's assume we can get the Diff.
-        
+        // MoM Difference
         const diffText = $(el).find('td.updown').first().text().trim().replace(/,/g, '');
-        // diffText might be "+ 100" or "- 50" or "0"
-        // Need to parse "+" or "-"
         let diff = 0;
-        // Simple parser for signed integers
-        // Remove spaces
         const cleanDiff = diffText.replace(/\s/g, '');
         if (cleanDiff) {
-            diff = parseInt(cleanDiff) || 0;
+            // Handle ▲/▼ icons or +/- text
+            const hasUp = cleanDiff.includes('▲') || cleanDiff.includes('+');
+            const hasDown = cleanDiff.includes('▼') || cleanDiff.includes('-');
+            const val = parseInt(cleanDiff.replace(/[^0-9]/g, '')) || 0;
+            diff = hasDown ? -val : val;
         }
 
         const prevSales = sales - diff;
         
-        // Store basics
         records.push({
             month,
             nation,
@@ -79,12 +69,12 @@ export async function scrapeDanawa(month: string, nation: 'domestic' | 'export')
             sales,
             prevSales,
             rank,
-            rankChange: 0, // Will calculate later
+            rankChange: 0,
             momAbs: diff,
-            momPct: 0, // Will calculate
-            score: 0, // Will calculate
+            momPct: 0,
+            score: 0,
             linkUrl: fullLink,
-            imageUrl: '' // Placeholder
+            imageUrl: ''
         });
     });
 
